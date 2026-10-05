@@ -1,0 +1,4 @@
+{
+  "outputDirectory": "public",
+  "crons": [{ "path": "/api/keepalive", "schedule": "0 6 * * *" }]
+}
