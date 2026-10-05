@@ -7,7 +7,7 @@ import { manager } from './views/manager.js';
 import { kiosk } from './views/kiosk.js';
 import { admin } from './views/admin.js';
 
-let cur = null, timer;
+let cur, timer;
 const views = { employee, manager, admin };
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
 addEventListener('nav', (e) => views[e.detail]());
