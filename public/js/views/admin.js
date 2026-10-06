@@ -16,8 +16,8 @@ export async function admin() {
   app(`${pend.html}<div class=card><h3>Créer un compte</h3><div class=row>
     <input id=n placeholder="Nom (état civil)"><input id=pr placeholder="Prénom"><input id=pw placeholder="Mot de passe initial (6 car. min.)">
     <select id=ro><option value=employee>Employé<option value=manager>Manager</select><select id=mg><option value="">Sans manager${managers}</select><button id=add>Créer le compte</button></div><p id=msg></p></div>
-  <div class="card w"><h3>Comptes</h3><table><tr><th>Matricule<th>Nom<th>Prénom<th>Rôle<th>Appareil<th></tr>
-  ${users.map((u) => `<tr><td>${u.matricule}<td>${u.nom}<td>${u.prenom}<td>${u.role}<td>${u.device_id ? 'lié' : '—'}<td><button class=g data-rel="${u.id}">Libérer l’appareil</button>`).join('')}</table></div>
+  <div class="card w"><h3>Comptes</h3><table><tr><th>Matricule<th>Nom<th>Prénom<th>Rôle<th>Appareil<th>Statut<th></tr>
+  ${users.map((u) => `<tr><td>${u.matricule}<td>${u.nom}<td>${u.prenom}<td>${u.role}<td>${u.device_id ? 'lié' : '—'}<td class=${u.active ? 'ok' : 'ko'}>${u.active ? 'actif' : 'désactivé'}<td><button class=g data-rel="${u.id}">Libérer l’appareil</button> <button class=g data-act="${u.id}" data-to="${u.active ? 0 : 1}">${u.active ? 'Désactiver' : 'Réactiver'}</button>`).join('')}</table></div>
   <div class=card><h3>Site (géolocalisation souple)</h3><div class=row><button class=g id=site>Utiliser ma position comme site</button><input id=rad type=number value=150 style="width:100px"><span class=m>mètres</span></div>
   <p class=m>Un pointage hors rayon est signalé en anomalie, jamais bloqué.</p></div>
   <div class=card><h3>Pointages</h3><div class=row id=f><input type=date id=d1><input type=date id=d2>
@@ -26,12 +26,26 @@ export async function admin() {
   ${(log || []).map((l) => `<tr><td>${fd(l.ts)}<td class=${l.result === 'ok' ? 'ok' : 'ko'}>${l.result}<td>${l.reason}`).join('')}</table></div>`);
 
   $('#add').onclick = async () => {
+    const btn = $('#add');
+    if (btn.disabled) return;
+    btn.disabled = true;
+    const body = { nom: $('#n').value.trim(), prenom: $('#pr').value.trim(), password: $('#pw').value, role: $('#ro').value, managerId: $('#mg').value || null };
     try {
-      const r = await api('create-user', { nom: $('#n').value.trim(), prenom: $('#pr').value.trim(), password: $('#pw').value, role: $('#ro').value, managerId: $('#mg').value || null });
+      let r;
+      try { r = await api('create-user', body); }
+      catch (e) {
+        if (!e.message.startsWith('DOUBLON:')) throw e;
+        if (!confirm(`Un compte existe déjà pour ce nom et prénom (${e.message.slice(8)}). Créer quand même un homonyme ?`)) { btn.disabled = false; return; }
+        r = await api('create-user', { ...body, force: true });
+      }
       alert('Compte créé : ' + r.matricule); admin();
-    } catch (e) { $('#msg').innerHTML = `<span class=ko>${e.message}</span>`; }
+    } catch (e) { $('#msg').innerHTML = `<span class=ko>${e.message}</span>`; btn.disabled = false; }
   };
   document.querySelectorAll('[data-rel]').forEach((b) => (b.onclick = async () => { await api('release-device', { uid: b.dataset.rel }); admin(); }));
+  document.querySelectorAll('[data-act]').forEach((b) => (b.onclick = async () => {
+    if (b.dataset.to === '0' && !confirm('Désactiver ce compte ? La personne ne pourra plus pointer.')) return;
+    await api('set-active', { uid: b.dataset.act, active: b.dataset.to === '1' }); admin();
+  }));
   $('#site').onclick = async () => {
     const g = await getGeo();
     if (!g) return alert('Position indisponible');

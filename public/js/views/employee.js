@@ -42,18 +42,39 @@ async function go(token) {
 }
 
 async function scan() {
-  const v = $('#v');
+  const v = $('#v'), st = $('#res');
+  st.textContent = 'Ouverture de la caméra…';
+  let stream;
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-    v.srcObject = stream; v.hidden = false; await v.play();
-    const cv = document.createElement('canvas'), x = cv.getContext('2d');
-    const it = setInterval(() => {
-      if (!v.videoWidth) return;
-      cv.width = v.videoWidth; cv.height = v.videoHeight; x.drawImage(v, 0, 0);
-      const c = jsQR(x.getImageData(0, 0, cv.width, cv.height).data, cv.width, cv.height);
-      if (c) { clearInterval(it); stream.getTracks().forEach((t) => t.stop()); go(c.data); }
-    }, 300);
-  } catch {
-    $('#res').innerHTML = '<span class=ko>Caméra indisponible : saisissez le code.</span>';
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+  } catch (e) {
+    st.innerHTML = `<span class=ko>Caméra inaccessible (${e.name}). Autorisez la caméra pour ce site dans les réglages du téléphone, puis réessayez.</span>`;
+    return;
   }
+  v.srcObject = stream; v.muted = true; v.hidden = false; await v.play();
+  st.textContent = 'Cadrez le QR de la borne, à 20–30 cm, sans reflet…';
+  const detector = 'BarcodeDetector' in window ? new BarcodeDetector({ formats: ['qr_code'] }) : null;
+  const cv = document.createElement('canvas'), x = cv.getContext('2d', { willReadFrequently: true });
+  let done = false;
+  const stop = () => { done = true; stream.getTracks().forEach((t) => t.stop()); v.hidden = true; };
+  const tick = async () => {
+    if (done) return;
+    try {
+      let text = null;
+      if (v.videoWidth) {
+        if (detector) { const r = await detector.detect(v); if (r[0]) text = r[0].rawValue; }
+        if (!text && typeof jsQR === 'function') {
+          const k = Math.min(1, 800 / v.videoWidth);
+          cv.width = v.videoWidth * k; cv.height = v.videoHeight * k;
+          x.drawImage(v, 0, 0, cv.width, cv.height);
+          const c = jsQR(x.getImageData(0, 0, cv.width, cv.height).data, cv.width, cv.height, { inversionAttempts: 'dontInvert' });
+          if (c) text = c.data;
+        }
+      }
+      if (text) { stop(); return go(text); }
+    } catch { /* image pas encore prête : on réessaie */ }
+    setTimeout(tick, 150);
+  };
+  tick();
 }
