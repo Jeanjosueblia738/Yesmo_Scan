@@ -4,7 +4,7 @@ import { $, S } from './ui.js';
 import { login } from './views/login.js';
 import { employee } from './views/employee.js';
 import { manager } from './views/manager.js';
-import { kiosk } from './views/kiosk.js';
+import { kiosk, releaseScreen } from './views/kiosk.js';
 import { admin } from './views/admin.js';
 
 let cur, timer;
@@ -17,6 +17,7 @@ async function start(session) {
   if (uid === cur) return; // ignore les rafraîchissements de jeton
   cur = uid;
   clearInterval(timer);
+  releaseScreen();
   if (!uid) { $('#h').innerHTML = '<span>Yesmo Scan</span>'; return login(); }
   const { data: me } = await sb.from('profiles').select('*').eq('id', uid).single();
   if (!me) { await sb.auth.signOut(); return login('Compte sans profil'); }

@@ -20,28 +20,31 @@ export default route(['employee', 'manager'], async ({ token, deviceId, geo, con
 
   if (!confirm) {
     if (!(+s === slot() || +s === slot() - 1)) return refuse('Code expiré, rescannez la borne');
-    if (me.device_id !== deviceId) return refuse('Appareil non reconnu pour ce compte. Demandez à l’admin de libérer l’appareil.');
+    if (me.device_id !== deviceId) return refuse('Appareil non reconnu pour ce compte. Demandez le changement d’appareil.');
     if (me.last_token === token) return refuse('Code déjà utilisé, attendez le suivant');
 
     const day = today();
     const [{ data: rows }, { data: open }, { data: lv }, { data: cfg }] = await Promise.all([
-      sb.from('attendance').select('check_in, check_out').eq('uid', me.id).eq('date', day),
+      sb.from('attendance').select('check_in, check_out, source').eq('uid', me.id).eq('date', day),
       sb.from('attendance').select('id, date').eq('uid', me.id).is('check_out', null).maybeSingle(),
       sb.from('leaves').select('id').eq('uid', me.id).neq('status', 'contesté').lte('start_date', day).gt('return_date', day).limit(1),
       sb.from('settings').select('value').eq('key', 'rules').maybeSingle(),
     ]);
     const R = rows || [], LV = lv || [];
-    const last = Math.max(0, ...R.flatMap((r) => [+new Date(r.check_in), r.check_out ? +new Date(r.check_out) : 0]));
+    const real = R.filter((r) => r.source !== 'intervention');
+    const last = Math.max(0, ...real.flatMap((r) => [+new Date(r.check_in), r.check_out ? +new Date(r.check_out) : 0]));
     if (last && Date.now() - last < 120000) return refuse('Pointage déjà enregistré il y a moins de 2 minutes (doublon refusé)');
 
     const warnings = [];
     let type = 'Entrée';
     if (open && open.date === day) type = 'Sortie';
     else if (open) warnings.push('Votre dernière arrivée n’a pas de départ : elle sera clôturée en « départ non pointé ».');
-    if (type === 'Entrée' && R.length) warnings.push('Vous avez déjà pointé aujourd’hui : cette arrivée sera enregistrée comme une nouvelle entrée.');
+    if (type === 'Entrée' && R.some((r) => r.source === 'intervention')) warnings.push('Une intervention validée couvre déjà cette journée : ce scan remplace l’horaire prévu, sans créer un second pointage.');
+    else if (type === 'Entrée' && real.length) warnings.push('Vous avez déjà pointé aujourd’hui : cette arrivée sera enregistrée comme une nouvelle entrée.');
     if (type === 'Entrée' && LV.length) warnings.push('Un congé est déclaré aujourd’hui : ce pointage sera signalé.');
     const lateFrom = (cfg && cfg.value && cfg.value.lateFrom) || '10:00';
-    const late = type === 'Entrée' && !R.length && !LV.length && hhmm() >= lateFrom;
+    const covered = R.some((r) => r.source === 'intervention');
+    const late = type === 'Entrée' && !real.length && !covered && !LV.length && hhmm() >= lateFrom;
 
     const until = Date.now() + 90000;
     return { preview: true, type, at: Date.now(), late, lateFrom, warnings, exp: until, tk: ticket(me.id, token, until) };

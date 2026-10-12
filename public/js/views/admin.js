@@ -1,9 +1,9 @@
 import { sb, api } from '../supabase.js';
-import { app, $, fd, hm, getGeo, esc, statusOf, outLabel, today, LATE_FROM } from '../ui.js';
+import { app, $, fd, hm, getGeo, esc, statusOf, outLabel, today, LATE_FROM, alertBar, notifyPending, wireAlert, readProof } from '../ui.js';
 import { work } from '../work.js';
 import { pendingBlock } from './corrections.js';
-import { validationsBlock, todayBlock } from './validations.js';
-import { eachDay, absenceEnd, absences, ouvrés, effectivePeriod } from '../period.js';
+import { validationsBlock, todayBlock, journalBlock, watchPending } from './validations.js';
+import { eachDay, absenceEnd, absences, ouvrés, effectivePeriod, extraInterventionHours } from '../period.js';
 
 let ATT = [], LV = [], IT = [], NAME = {}, PEOPLE = [], EDIT = null, LOADED = { a: '', b: '' };
 let loadSeq = 0;
@@ -23,7 +23,8 @@ export async function admin() {
   const managers = users.filter((u) => u.role === 'manager').map((u) => `<option value=${u.id}>${esc(u.nom)} ${esc(u.prenom)}</option>`).join('');
   const people = users.map((u) => `<option value=${u.id}>${esc(u.nom)} ${esc(u.prenom)}</option>`).join('');
 
-  app(`${day.html}${vals.html}${pend.html}
+  const journal = await journalBlock(NAME);
+  app(`${alertBar(vals.pending)}${day.html}${vals.html}${pend.html}
   <div class=card><h3>Créer un compte</h3><div class=row>
     <input id=n placeholder="Nom (état civil)"><input id=pr placeholder="Prénom"><input id=pw placeholder="Mot de passe initial (6 car. min.)">
     <select id=ro><option value=employee>Employé<option value=manager>Manager</select><select id=mg><option value="">Sans manager${managers}</select><button id=add>Créer le compte</button></div><p id=msg></p></div>
@@ -34,9 +35,10 @@ export async function admin() {
     <div class=row><select id=mu>${people}</select><input type=date id=md><input type=time id=mi><input type=time id=mo><input id=mm placeholder="Motif (obligatoire)" style="flex:1"></div>
     <div class=row><button id=ms>Enregistrer</button><button class=g id=mc hidden>Annuler la modification</button></div><p id=mr></p></div>
 
-  <div class=card><h3>Déclarer un congé pour un employé</h3><p class=m>Congé déjà validé dans le système de congés.</p>
+  <div class=card><h3>Déclarer un congé pour un employé</h3><p class=m>Congé déjà validé dans le système de congés, avec la photo de cette validation.</p>
     <div class=row><select id=lu>${people}</select><select id=lt><option>Congé annuel<option>Congé maladie<option>Congé maternité/paternité<option>Congé exceptionnel<option>Autre</select><label class=m>Départ <input type=date id=ls></label><label class=m>Retour <input type=date id=lr></label></div>
-    <div class=row><input id=lf placeholder="Référence de la validation"><input id=lc placeholder="Commentaire (facultatif)" style="flex:1"><button id=lb>Déclarer</button></div><p id=lm></p></div>
+    <div class=row><input id=lf placeholder="Référence de la validation"><input id=lc placeholder="Commentaire (facultatif)" style="flex:1"></div>
+    <div class=row><label class=m>Photo <input type=file id=lp accept="image/*"></label><button id=lb>Déclarer</button></div><p id=lm></p></div>
 
   <div class=card><h3>Site (géolocalisation souple)</h3><div class=row><button class=g id=site>Utiliser ma position comme site</button><input id=rad type=number value=150 style="width:100px"><span class=m>mètres</span></div>
   <p class=m>Un pointage hors rayon est signalé en anomalie, jamais bloqué.</p></div>
@@ -45,10 +47,10 @@ export async function admin() {
     <select id=se><option value="">Tous les employés${users.map((u) => `<option value=${esc(u.matricule)}>${esc(u.nom)} ${esc(u.prenom)}</option>`).join('')}</select><button id=exp>Exporter en Excel</button></div>
     <p class=m id=periodNote>Chargement de la période…</p><div class=w id=tb></div>
     <details><summary id=absSum>Absences de la période</summary>
-    <p class=m>Lundi au vendredi, sans pointage, sans congé (même encore à vérifier) et sans intervention validée. Les jours fériés ne sont pas retirés. Seuls les comptes actifs sont comptés.</p>
+    <p class=m>Lundi au vendredi, hors jours fériés de Côte d’Ivoire, sans pointage, sans congé (même encore à vérifier) et sans intervention validée. Seuls les comptes actifs sont comptés.</p>
     <div class=w id=abs></div></details></div>
   <div class="card w"><h3>Dernières tentatives</h3><table><tr><th>Heure<th>Résultat<th>Détail</tr>
-  ${(log.data || []).map((l) => `<tr><td>${fd(l.ts)}<td class=${l.result === 'ok' ? 'ok' : 'ko'}>${l.result}<td>${esc(l.reason)}`).join('')}</table></div>`);
+  ${(log.data || []).map((l) => `<tr><td>${fd(l.ts)}<td class=${l.result === 'ok' ? 'ok' : 'ko'}>${l.result}<td>${esc(l.reason)}`).join('')}</table></div>${journal}`);
 
   const body = () => ({ nom: $('#n').value.trim(), prenom: $('#pr').value.trim(), password: $('#pw').value, role: $('#ro').value, managerId: $('#mg').value || null });
   $('#add').onclick = async () => {
@@ -82,7 +84,7 @@ export async function admin() {
   $('#mc').onclick = () => admin();
   $('#lb').onclick = async () => {
     $('#lb').disabled = true;
-    try { await work('declare-leave', { uid: $('#lu').value, type: $('#lt').value, startDate: $('#ls').value, returnDate: $('#lr').value, reference: $('#lf').value, comment: $('#lc').value }); admin(); }
+    try { await work('declare-leave', { uid: $('#lu').value, type: $('#lt').value, startDate: $('#ls').value, returnDate: $('#lr').value, reference: $('#lf').value, comment: $('#lc').value, proof: await readProof($('#lp')) }); admin(); }
     catch (e) { $('#lm').innerHTML = `<span class=ko>${esc(e.message)}</span>`; $('#lb').disabled = false; }
   };
   $('#site').onclick = async () => {
@@ -97,6 +99,9 @@ export async function admin() {
   $('#exp').onclick = exportXlsx;
   loadPeriod();
   pend.wire(admin); vals.wire(admin);
+  wireAlert(vals.pending);
+  notifyPending(vals.pending);
+  watchPending(admin);
 }
 
 const filt = () => ({ a: $('#d1').value, b: $('#d2').value, e: $('#se').value });
@@ -139,7 +144,7 @@ async function fetchAll(make) {
 function fetchPeriod(a, b) {
   return Promise.all([
     fetchAll(() => sb.from('attendance').select('*').gte('date', a).lte('date', b).order('date').order('id')),
-    fetchAll(() => sb.from('leaves').select('*').lte('start_date', b).gt('return_date', a).order('start_date').order('id')),
+    fetchAll(() => sb.from('leaves').select('id,uid,matricule,nom,prenom,manager_id,type,start_date,return_date,reference,comment,declared_by,status,checked_by,checked_at,created_at').lte('start_date', b).gt('return_date', a).order('start_date').order('id')),
     fetchAll(() => sb.from('interventions').select('*').lte('date_start', b).gte('date_end', a).order('date_start').order('id')),
   ]).then(([att, lv, it]) => ({ att, lv, it }));
 }
@@ -250,6 +255,10 @@ function writeWorkbook() {
     if (x.auto_closed) o['Départs non pointés']++; o['Heures travaillées'] += (x.duration_min || 0) / 60; });
   Lv.forEach((l) => (row(l.matricule, l.nom, l.prenom)['Jours de congé'] += leaveDays(l, a, b)));
   It.forEach((i) => row(i.matricule, i.nom, i.prenom)['Interventions validées']++);
+  Object.entries(extraInterventionHours(It, A)).forEach(([m, h]) => {
+    const p = PEOPLE.find((x) => x.matricule === m);
+    row(m, p ? p.nom : '', p ? p.prenom : '')['Heures travaillées'] += h;
+  });
   const list = currentAbsences();
   list.forEach((x) => row(x.matricule, x.nom, x.prenom)["Jours d'absence"]++);
   const synth = Object.values(S).sort((p, q) => p.Matricule.localeCompare(q.Matricule));

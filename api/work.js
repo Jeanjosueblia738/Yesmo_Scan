@@ -81,7 +81,7 @@ const ACTIONS = {
   } },
 
   // Congé déjà validé dans l'autre système, déclaré ici. L'admin peut le saisir pour quelqu'un.
-  'declare-leave': { roles: ['employee', 'manager', 'admin'], fn: async ({ uid, type, startDate, returnDate, reference, comment }, me) => {
+  'declare-leave': { roles: ['employee', 'manager', 'admin'], fn: async ({ uid, type, startDate, returnDate, reference, comment, proof }, me) => {
     let p = me;
     if (uid && uid !== me.id) {
       must(me.role === 'admin', 'Accès refusé', 403);
@@ -94,11 +94,14 @@ const ACTIONS = {
     must(isDate(startDate) && isDate(returnDate) && returnDate > startDate, 'Le retour doit être après le départ');
     must((Date.parse(returnDate) - Date.parse(startDate)) / 864e5 <= 120, '120 jours au maximum par déclaration');
     must(String(reference || '').trim().length >= 2, 'Référence de la validation requise');
+    const pic = String(proof || '');
+    must(pic.startsWith('data:image/jpeg;base64,'), 'Photo de la validation requise');
+    must(pic.length <= 500000, 'Photo trop lourde');
     const { data: ov } = await sb.from('leaves').select('id').eq('uid', p.id).neq('status', 'contesté').lt('start_date', returnDate).gt('return_date', startDate);
     must(!(ov || []).length, 'Un congé déjà déclaré chevauche ces dates', 409);
     await sb.from('leaves').insert({ uid: p.id, matricule: p.matricule, nom: p.nom, prenom: p.prenom, manager_id: p.manager_id,
       type, start_date: startDate, return_date: returnDate, reference: String(reference).trim(),
-      comment: String(comment || '').trim() || null, declared_by: me.id });
+      comment: String(comment || '').trim() || null, declared_by: me.id, proof: pic });
     return { ok: true };
   } },
 
@@ -134,6 +137,27 @@ const ACTIONS = {
       must(!error, error && error.message);
       await log({ attendance_id: ins.id, uid: p.id, by_id: me.id, action: 'saisie manuelle', motif: m, before: null, after: { date, check_in: ci, check_out: co } });
     }
+    return { ok: true };
+  } },
+
+  'request-device': { roles: ['employee', 'manager'], fn: async ({ deviceId }, me) => {
+    must(String(deviceId || '').length >= 8, 'Appareil inconnu');
+    const { data: pend } = await sb.from('device_requests').select('id').eq('uid', me.id).eq('status', 'en attente').limit(1);
+    if ((pend || []).length) return { ok: true };
+    await sb.from('device_requests').insert({
+      uid: me.id, matricule: me.matricule, nom: me.nom, prenom: me.prenom, manager_id: me.manager_id, device_id: deviceId,
+    });
+    return { ok: true };
+  } },
+
+  'decide-device': { roles: ['manager', 'admin'], fn: async ({ id, approve }, me) => {
+    const { data: req } = await sb.from('device_requests').select('*').eq('id', id).maybeSingle();
+    must(req && req.status === 'en attente', 'Demande introuvable ou déjà traitée', 409);
+    must(inTeam(me, req), 'Cette demande n’est pas dans votre équipe', 403);
+    must(req.uid !== me.id, 'Vous ne pouvez pas traiter votre propre demande', 403);
+    const now = new Date();
+    if (approve) await sb.from('profiles').update({ device_id: req.device_id }).eq('id', req.uid);
+    await sb.from('device_requests').update({ status: approve ? 'acceptée' : 'refusée', decided_by: me.id, decided_at: now }).eq('id', id);
     return { ok: true };
   } },
 };

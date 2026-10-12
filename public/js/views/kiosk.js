@@ -1,6 +1,16 @@
 import { api } from '../supabase.js';
 import { app, $ } from '../ui.js';
 
+let wake;
+async function arm() {
+  try { wake = await navigator.wakeLock?.request('screen'); } catch { wake = null; }
+}
+export function releaseScreen() {
+  const s = wake;
+  wake = null;
+  s?.release?.().catch(() => {});
+}
+
 // Affiche le QR et le renouvelle quand le jeton change. Retourne l'intervalle pour l'arrêter.
 export function kiosk() {
   const size = Math.round(Math.min(innerWidth * 0.8, innerHeight * 0.55, 420));
@@ -15,5 +25,12 @@ export function kiosk() {
     } catch (e) { $('#kerr').textContent = 'Connexion au serveur impossible : ' + e.message; }
   };
   tick();
+  arm();
+  if (!globalThis.__ysWake) {
+    globalThis.__ysWake = true;
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && document.getElementById('qr')) arm();
+    });
+  }
   return setInterval(tick, 5000);
 }

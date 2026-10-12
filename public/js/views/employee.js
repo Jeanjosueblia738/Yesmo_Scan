@@ -1,21 +1,53 @@
 import { sb, api } from '../supabase.js';
-import { app, $, fd, hm, deviceId, getGeo, S, nav, esc, statusOf, outLabel } from '../ui.js';
+import { app, $, fd, hm, deviceId, getGeo, S, nav, esc, statusOf, outLabel, readProof } from '../ui.js';
 import { work } from '../work.js';
+
+const PENDING = 'yesmo-pending-punch';
 
 const MOTIFS = ['Intervention client', 'Transport', 'Rendez-vous externe', 'Autre'];
 const TYPES = ['Congé annuel', 'Congé maladie', 'Congé maternité/paternité', 'Congé exceptionnel', 'Autre'];
 const opts = (a) => a.map((x) => `<option>${x}</option>`).join('');
 const list = (arr, f) => (arr.length ? arr.map(f).join('') : '<p class=m>Aucune.</p>');
 
+async function settlePending() {
+  const raw = localStorage.getItem(PENDING);
+  if (!raw) return null;
+  let body;
+  try { body = JSON.parse(raw); } catch { localStorage.removeItem(PENDING); return null; }
+  if (!(body.exp > Date.now())) {
+    localStorage.removeItem(PENDING);
+    return { msg: '<span class=ko>Le pointage en attente a expiré. Scannez à nouveau la borne.</span>' };
+  }
+  try {
+    const p = await api('punch', body);
+    localStorage.removeItem(PENDING);
+    if (p.late && !p.lateStatus) return { lateForm: { id: p.attendanceId, info: `${p.type} enregistrée à ${hm(p.at)}` } };
+    return { msg: `<span class=ok>${esc(p.type)} enregistrée à ${esc(hm(p.at))}</span>` };
+  } catch (e) {
+    if (e.offline) return { msg: '<span class=m>Pointage en attente : il sera renvoyé dès que le réseau revient.</span>' };
+    localStorage.removeItem(PENDING);
+    return { msg: `<span class=ko>${esc(e.message)}</span>` };
+  }
+}
+
+if (!globalThis.__ysOnline) {
+  globalThis.__ysOnline = true;
+  addEventListener('online', () => { if (localStorage.getItem(PENDING)) employee(); });
+}
+
 export async function employee(msg = '') {
+  const pending = await settlePending();
+  if (pending?.lateForm) return lateForm(pending.lateForm.id, pending.lateForm.info);
+  if (pending?.msg) msg = pending.msg;
   const u = S.me;
-  api('bind-device', { deviceId }).catch(() => {});
+  const bind = await api('bind-device', { deviceId }).catch(() => null);
+  const foreign = bind && bind.bound === false;
   const q = (t) => sb.from(t).select('*').eq('uid', u.id);
   const [att, cor, itv, lv] = await Promise.all([
     q('attendance').order('check_in', { ascending: false }).limit(30),
     q('corrections').order('created_at', { ascending: false }).limit(10),
     q('interventions').order('created_at', { ascending: false }).limit(10),
-    q('leaves').order('start_date', { ascending: false }).limit(10),
+    sb.from('leaves').select('start_date,return_date,type,status').eq('uid', u.id).order('start_date', { ascending: false }).limit(10),
   ]);
   const A = att.data || [], open = A.find((a) => !a.check_out);
   const toJustify = A.filter((a) => a.late && (!a.late_status || a.late_status === 'refusé'));
@@ -26,6 +58,7 @@ export async function employee(msg = '') {
   <div class=row><button id=sc>Scanner le QR de la borne</button></div>
   <div class=row><input id=c placeholder="Code de la borne"><button id=pk>Pointer</button></div>
   <p id=res>${msg}</p></div>
+  ${foreign ? `<div class=card><p class=ko>Ce téléphone n’est pas l’appareil enregistré pour ce compte.</p><button id=devAsk>Demander à utiliser ce téléphone</button><p id=devMsg></p></div>` : ''}
   ${S.role === 'manager' ? '<div class=row><button class=g id=bk>Espace manager</button></div>' : ''}
   ${toJustify.length ? `<div class=card><h3>Retards à justifier</h3>${toJustify.map((a) => `<p>${a.date}, arrivée à ${hm(a.check_in)}${a.late_status === 'refusé' ? ' <span class=ko>(justification refusée)</span>' : ''} <button class=g data-late="${a.id}">Justifier</button></p>`).join('')}</div>` : ''}
 
@@ -35,9 +68,10 @@ export async function employee(msg = '') {
     ${list(itv.data || [], (i) => `<p class=m>${i.date_start}${i.date_end !== i.date_start ? ' → ' + i.date_end : ''} · ${esc(i.client)} : ${esc(i.status)}</p>`)}</details>
 
   <details class=card><summary><b>Déclarer un congé validé</b></summary>
-    <p class=m>Déclarez ici un congé déjà validé dans le système de congés, pour ne pas être compté absent ni en retard. Les jours de congé vont de la date de départ jusqu’à la veille de la date de retour (jour de reprise).</p>
+    <p class=m>Déclarez ici un congé déjà validé dans le système de congés, avec la photo de cette validation. Les jours de congé vont de la date de départ jusqu’à la veille de la date de retour (jour de reprise).</p>
     <div class=row><select id=lvT>${opts(TYPES)}</select><label class=m>Départ <input type=date id=lvS></label><label class=m>Retour <input type=date id=lvR></label></div>
-    <div class=row><input id=lvF placeholder="Référence de la validation (n° ou date)"><input id=lvC placeholder="Commentaire (facultatif)" style="flex:1"><button id=lvB>Déclarer</button></div><p id=lvM></p>
+    <div class=row><input id=lvF placeholder="Référence de la validation (n° ou date)"><input id=lvC placeholder="Commentaire (facultatif)" style="flex:1"></div>
+    <div class=row><label class=m>Photo de la validation <input type=file id=lvP accept="image/*"></label><button id=lvB>Déclarer</button></div><p id=lvM></p>
     ${list(lv.data || [], (l) => `<p class=m>${l.start_date} → retour le ${l.return_date} · ${esc(l.type)} : ${esc(l.status)}</p>`)}</details>
 
   <details class=card><summary><b>Demander une correction</b> (oubli de pointage, panne)</summary>
@@ -47,6 +81,11 @@ export async function employee(msg = '') {
   <div class="card w"><h3>Historique</h3><table><tr><th>Date<th>Arrivée<th>Départ<th>Statut<th>Anomalie</tr>
   ${A.map((a) => `<tr><td>${a.date}<td>${hm(a.check_in)}<td>${outLabel(a)}<td>${esc(statusOf(a))}<td>${esc((a.anomalies || []).join(', '))}`).join('')}</table></div>`);
 
+  if ($('#devAsk')) $('#devAsk').onclick = async () => {
+    $('#devAsk').disabled = true;
+    try { await work('request-device', { deviceId }); $('#devMsg').innerHTML = '<span class=ok>Demande envoyée. Le manager ou l’admin doit l’accepter.</span>'; }
+    catch (e) { $('#devMsg').innerHTML = `<span class=ko>${esc(e.message)}</span>`; $('#devAsk').disabled = false; }
+  };
   $('#pk').onclick = () => go($('#c').value);
   $('#sc').onclick = scan;
   if ($('#bk')) $('#bk').onclick = () => nav('manager');
@@ -58,7 +97,7 @@ export async function employee(msg = '') {
     catch (e) { $(res).innerHTML = `<span class=ko>${esc(e.message)}</span>`; btn.disabled = false; }
   };
   $('#ivB').onclick = () => run($('#ivB'), '#ivR', () => work('declare-intervention', { client: $('#ivC').value, dateStart: $('#ivD').value, dateEnd: $('#ivE').value, fullDay: $('#ivA').checked, startTime: $('#ivS').value, endTime: $('#ivF').value, comment: $('#ivM').value }), 'Intervention déclarée, en attente de validation');
-  $('#lvB').onclick = () => run($('#lvB'), '#lvM', () => work('declare-leave', { type: $('#lvT').value, startDate: $('#lvS').value, returnDate: $('#lvR').value, reference: $('#lvF').value, comment: $('#lvC').value }), 'Congé déclaré');
+  $('#lvB').onclick = () => run($('#lvB'), '#lvM', async () => work('declare-leave', { type: $('#lvT').value, startDate: $('#lvS').value, returnDate: $('#lvR').value, reference: $('#lvF').value, comment: $('#lvC').value, proof: await readProof($('#lvP')) }), 'Congé déclaré');
   $('#cb').onclick = () => run($('#cb'), '#cr', () => api('request-correction', { date: $('#cd').value, in: $('#ci').value, out: $('#co').value, motif: $('#cm').value }), 'Demande envoyée');
 }
 
@@ -79,12 +118,20 @@ function confirmScreen(token, r) {
   $('#no').onclick = () => employee();
   $('#ok').onclick = async () => {
     $('#ok').disabled = true;
+    const geo = await getGeo();
+    const body = { token, deviceId, geo, confirm: true, exp: r.exp, tk: r.tk };
     try {
-      const p = await api('punch', { token, deviceId, geo: await getGeo(), confirm: true, exp: r.exp, tk: r.tk });
+      const p = await api('punch', body);
       const done = `${p.type} enregistrée à ${hm(p.at)}`;
       if (p.late && !p.lateStatus) return lateForm(p.attendanceId, done);
       employee(`<span class=ok>${esc(done)}${p.anomalies.length ? ' — ' + esc(p.anomalies.join(', ')) : ''}</span>`);
-    } catch (e) { employee(`<span class=ko>${esc(e.message)}</span>`); }
+    } catch (e) {
+      if (e.offline) {
+        localStorage.setItem(PENDING, JSON.stringify(body));
+        return employee('<span class=m>Réseau coupé. Le pointage sera renvoyé automatiquement.</span>');
+      }
+      employee(`<span class=ko>${esc(e.message)}</span>`);
+    }
   };
 }
 
