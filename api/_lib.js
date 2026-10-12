@@ -6,6 +6,10 @@ export const TTL = 15; // secondes par créneau de jeton
 export const slot = () => Math.floor(Date.now() / 1000 / TTL);
 export const sign = (s) => s + '.' + crypto.createHmac('sha256', process.env.TOKEN_SECRET).update(String(s)).digest('hex').slice(0, 16);
 
+// Ticket de confirmation : lie un pointage prévisualisé à la personne, au code scanné et à une échéance.
+export const ticket = (uid, token, exp) =>
+  crypto.createHmac('sha256', process.env.TOKEN_SECRET).update(`ticket|${uid}|${token}|${exp}`).digest('hex').slice(0, 24);
+
 export class HttpError extends Error {
   constructor(code, msg) { super(msg); this.code = code; }
 }

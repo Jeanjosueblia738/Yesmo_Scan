@@ -9,6 +9,7 @@ export default route(['admin', 'manager'], async ({ id, approve }, me) => {
     const { error } = await sb.from('attendance').insert({
       uid: c.uid, matricule: c.matricule, nom: c.nom, prenom: c.prenom, manager_id: c.manager_id, date: c.date,
       check_in: ci, check_out: co, duration_min: Math.round((co - ci) / 60000), anomalies: ['corrigé'],
+      source: 'correction', note: c.motif, manual_by: me.id, manual_at: new Date(),
     });
     if (error) throw new HttpError(409, error.message);
   }
