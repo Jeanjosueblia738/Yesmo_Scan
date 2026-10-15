@@ -1,5 +1,5 @@
 // À renseigner : Supabase > Project Settings > API (URL du projet + clé anon/publishable).
-import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/+esm';
 
 export const sb = createClient('https://kvmllehwesxucdoryghl.supabase.co', 'sb_publishable_LqluoEako5ky9TKoYR5DpQ_dxzed6bv');
 

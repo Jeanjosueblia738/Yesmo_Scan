@@ -12,11 +12,10 @@ export async function validationsBlock() {
   const [late, itv, lv, dev] = await Promise.all([
     sb.from('attendance').select('*').eq('late_status', 'en attente').order('check_in'),
     sb.from('interventions').select('*').eq('status', 'en attente').order('created_at'),
-    sb.from('leaves').select('*').eq('status', 'déclaré').order('created_at'),
+    sb.from('leaves').select('id,nom,prenom,type,start_date,return_date,reference,comment,status').eq('status', 'déclaré').order('created_at'),
     sb.from('device_requests').select('*').eq('status', 'en attente').order('created_at'),
   ]);
   const L = late.data || [], I = itv.data || [], V = lv.data || [], D = dev.error ? [] : (dev.data || []);
-  const proofs = new Map(V.filter((l) => l.proof).map((l) => [l.id, l.proof]));
   const card = (title, n, body) => `<div class="card w"><h3>${title} (${n})</h3>${n ? body : '<p class=m>Rien à traiter.</p>'}</div>`;
   const html =
     card('Retards à valider', L.length, `<table>${TH('Employé', 'Date', 'Arrivée', 'Motif', 'Commentaire', '')}${L.map((a) =>
@@ -24,7 +23,7 @@ export async function validationsBlock() {
     card('Interventions à valider', I.length, `<table>${TH('Employé', 'Client / site', 'Période', 'Heures', 'Commentaire', '')}${I.map((i) =>
       `<tr><td>${who(i)}<td>${esc(i.client)}<td>${i.date_start}${i.date_end !== i.date_start ? ' → ' + i.date_end : ''}<td>${i.full_day ? 'journée(s) entière(s)' : esc(i.start_time) + '–' + esc(i.end_time)}<td>${esc(i.comment || '')}<td><button data-itv="${i.id}" data-ok="1">Valider</button> <button class=g data-itv="${i.id}" data-ok="0">Refuser</button>`).join('')}</table>`) +
     card('Congés déclarés à contrôler', V.length, `<p class=m>Comparez la photo avec la validation dans le système de congés. « Contester » retire le congé : les jours redeviennent des absences.</p><table>${TH('Employé', 'Type', 'Départ', 'Retour', 'Référence', 'Commentaire', '')}${V.map((l) =>
-      `<tr><td>${who(l)}<td>${esc(l.type)}<td>${l.start_date}<td>${l.return_date}<td>${esc(l.reference)}<td>${esc(l.comment || '')}<td>${l.proof ? `<button class=g type=button data-proof="${l.id}">Pièce</button> ` : ''}<button data-lv="${l.id}" data-st="vérifié">Vérifié</button> <button class=g data-lv="${l.id}" data-st="contesté">Contester</button>`).join('')}</table>`) +
+      `<tr><td>${who(l)}<td>${esc(l.type)}<td>${l.start_date}<td>${l.return_date}<td>${esc(l.reference)}<td>${esc(l.comment || '')}<td><button class=g type=button data-proof="${l.id}">Pièce</button> <button data-lv="${l.id}" data-st="vérifié">Vérifié</button> <button class=g data-lv="${l.id}" data-st="contesté">Contester</button>`).join('')}</table>`) +
     (D.length ? card('Changements de téléphone', D.length, `<table>${TH('Employé', 'Demandé le', '')}${D.map((r) =>
       `<tr><td>${who(r)}<td>${fd(r.created_at)}<td><button data-dev="${r.id}" data-ok="1">Accepter</button> <button class=g data-dev="${r.id}" data-ok="0">Refuser</button>`).join('')}</table>`) : '');
   const wire = (refresh) => {
@@ -36,7 +35,13 @@ export async function validationsBlock() {
     on('[data-itv]', 'decide-intervention', (b) => ({ id: b.dataset.itv, approve: b.dataset.ok === '1' }));
     on('[data-lv]', 'check-leave', (b) => ({ id: b.dataset.lv, status: b.dataset.st }));
     on('[data-dev]', 'decide-device', (b) => ({ id: b.dataset.dev, approve: b.dataset.ok === '1' }));
-    document.querySelectorAll('[data-proof]').forEach((b) => (b.onclick = () => showProof(proofs.get(b.dataset.proof))));
+    document.querySelectorAll('[data-proof]').forEach((b) => (b.onclick = async () => {
+      b.disabled = true;
+      const { data, error } = await sb.from('leaves').select('proof').eq('id', b.dataset.proof).single();
+      b.disabled = false;
+      if (error || !data || !data.proof) { alert(error ? error.message : 'Aucune photo pour ce congé'); return; }
+      showProof(data.proof);
+    }));
   };
   return { html, wire, pending: L.length + I.length + V.length + D.length };
 }

@@ -218,6 +218,7 @@ function showAbsences() {
 }
 
 async function exportXlsx() {
+  if (typeof XLSX === 'undefined') { alert('L’export Excel n’est pas encore chargé. Attendez quelques secondes et réessayez.'); return; }
   const btn = $('#exp');
   btn.disabled = true; const label = btn.textContent; btn.textContent = 'Export…';
   try {
