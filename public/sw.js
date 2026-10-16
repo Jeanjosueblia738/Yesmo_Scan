@@ -1,5 +1,5 @@
-const C = 'yesmo-scan-v7';
-const SHELL = ['/', '/css/app.css', '/js/app.js', '/js/ui.js', '/js/supabase.js'];
+const C = 'yesmo-scan-v8';
+const SHELL = ['/', '/css/app.css', '/js/app.js', '/js/ui.js', '/js/supabase.js', '/vendor/supabase.js'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil((async () => {
@@ -16,24 +16,32 @@ self.addEventListener('activate', (e) => {
   })());
 });
 
-// Le réseau a 6 secondes. S'il ne répond pas, on sert la copie déjà ouverte,
-// au lieu de laisser la fenêtre rouge et vide.
+// On demande l'adresse, pas la requête de navigation : celle-ci peut rester
+// bloquée et laisser la fenêtre blanche.
+function network(url) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 8000);
+  return fetch(url, { signal: ctrl.signal, cache: 'no-store', credentials: 'same-origin' }).finally(() => clearTimeout(timer));
+}
+
 self.addEventListener('fetch', (e) => {
-  if (e.request.method !== 'GET' || new URL(e.request.url).origin !== location.origin) return;
+  const url = new URL(e.request.url);
+  if (e.request.method !== 'GET' || url.origin !== location.origin) return;
   e.respondWith((async () => {
+    const path = url.origin + (url.pathname || '/');
+    if (url.searchParams.has('reset')) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
     const cache = await caches.open(C);
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 6000);
     try {
-      const r = await fetch(e.request, { signal: ctrl.signal });
-      if (r && r.ok) cache.put(e.request, r.clone()).catch(() => {});
+      const r = await network(e.request.url);
+      if (r && r.ok && r.type === 'basic' && !url.searchParams.has('reset')) cache.put(path, r.clone()).catch(() => {});
       return r;
     } catch {
-      const hit = (await cache.match(e.request)) || (e.request.mode === 'navigate' ? await cache.match('/') : null);
+      const hit = (await cache.match(path)) || (e.request.mode === 'navigate' ? await cache.match(url.origin + '/') : undefined);
       if (hit) return hit;
-      return new Response('Hors ligne', { status: 503, headers: { 'Content-Type': 'text/plain;charset=utf-8' } });
-    } finally {
-      clearTimeout(timer);
+      return new Response('Hors ligne', { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
     }
   })());
 });

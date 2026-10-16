@@ -7,6 +7,7 @@ import { manager } from './views/manager.js';
 import { kiosk, releaseScreen } from './views/kiosk.js';
 import { admin } from './views/admin.js';
 
+globalThis.__ysBooted = true;
 let cur, timer, booted = false;
 const views = { employee, manager, admin };
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
@@ -14,7 +15,7 @@ addEventListener('nav', (e) => { const fn = views[e.detail]; if (fn) fn(); });
 
 function showError(message) {
   $('#h').innerHTML = '<span>Yesmo Scan</span>';
-  $('#app').innerHTML = '<p class=ko></p>';
+  $('#app').innerHTML = '<p class=ko></p><p class=m><a href="/?reset=1">Réinitialiser l\'application</a></p>';
   $('#app').firstChild.textContent = message || 'Ouverture impossible';
 }
 

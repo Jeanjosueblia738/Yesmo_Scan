@@ -7,8 +7,54 @@
 <script async src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script async src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
 <script async src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+if (location.search.indexOf('reset=1') !== -1) {
+  var finish = function () { location.replace('/'); };
+  var wipe = function () {
+    if (!window.caches) return finish();
+    caches.keys().then(function (keys) {
+      return Promise.all(keys.map(function (k) { return caches.delete(k); }));
+    }).then(finish, finish);
+  };
+  if (navigator.serviceWorker) {
+    navigator.serviceWorker.getRegistrations().then(function (regs) {
+      return Promise.all(regs.map(function (r) { return r.unregister(); }));
+    }).then(wipe, wipe);
+  } else wipe();
+}
+</script>
 </head><body>
 <header id="h"><span>Yesmo Scan</span></header>
-<main id="app"><p class="m">Ouverture…</p></main>
+<main id="app">
+  <div class="card"><h2>Connexion</h2>
+    <div class="row"><input id="i" placeholder="Matricule" autocomplete="username"><input id="p" type="password" placeholder="Mot de passe" autocomplete="current-password"><button type="button" id="go">Se connecter</button></div>
+    <p class="ko" id="msg"></p>
+    <p class="m"><a href="/?reset=1">Réinitialiser l'application</a></p>
+  </div>
+</main>
+<script src="vendor/supabase.js"></script>
 <script type="module" src="js/app.js"></script>
+<script>
+(function () {
+  var btn = document.getElementById('go');
+  if (!btn) return;
+  btn.onclick = function () {
+    var msg = document.getElementById('msg');
+    var lib = window.supabase;
+    if (!lib || !lib.createClient) {
+      if (msg) msg.textContent = "Connexion impossible. Utilisez « Réinitialiser l'application ».";
+      return;
+    }
+    if (msg) msg.textContent = 'Connexion...';
+    var email = document.getElementById('i').value.trim().toLowerCase() + '@pointage.local';
+    lib.createClient('https://kvmllehwesxucdoryghl.supabase.co', 'sb_publishable_LqluoEako5ky9TKoYR5DpQ_dxzed6bv')
+      .auth.signInWithPassword({ email: email, password: document.getElementById('p').value })
+      .then(function (res) {
+        if (res.error) { if (msg) msg.textContent = 'Matricule ou mot de passe incorrect'; return; }
+        location.reload();
+      })
+      .catch(function () { if (msg) msg.textContent = 'Connexion impossible'; });
+  };
+})();
+</script>
 </body></html>
